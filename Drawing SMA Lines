@@ -1,0 +1,86 @@
+library(quantmod)
+library(readxl)
+library(ggplot2)
+
+#获取数据
+get_StockData <- function(tickerSym) {
+  stockData<- getSymbols(tickerSym,src="yahoo",from="2017-06-01",to="2017-10-01",auto.assign=F)
+  stockData <- data.frame(time(stockData),Op(stockData),Cl(stockData),Vo(stockData))
+  colnames(stockData) <- c("DATE","OPEN","CLOSE","VOLUME")
+  stockData <- stockData[stockData$VOLUME != 0,]
+  stockData$LOG_RET <- c(NA,diff(log(stockData$CLOSE)))#产生对数收益率
+  stockData <- na.omit(stockData)
+  stockData <- transform(stockData,ret=(CLOSE-OPEN)/OPEN,SMA5=SMA(CLOSE,5),SMA10=SMA(CLOSE,10),SMA20=SMA(CLOSE,20),SMA60=SMA(CLOSE,60))
+  #股票评级
+  stockData <- within(stockData,{
+    retlevel <- NA
+    retlevel[ret >= 0.005] <- "暴涨"
+    retlevel[ret >= 0 & ret < 0.005 ] <- "略涨"
+    retlevel[ret == 0 | is.na(ret) ] <- "干嘛呢？"
+    retlevel[ret >= -0.005 & ret < 0 ] <- "略跌"
+    retlevel[ret < -0.005 ] <- "暴跌"  
+  })
+}
+#金叉死叉
+MACD_MA5MA10 <- function(stockData){
+  stockData <- na.omit(stockData[,c(1,3,7,8)])#仅提取5、10日均线，其他有需要再取
+  stockData$sig=c(NA,diff(as.numeric(stockData$SMA5 > stockData$SMA10)))
+  stockData$flag <- "HOLD"
+  stockData$flag[stockData$sig==1] <- "BUY"
+  stockData$flag[stockData$sig==-1] <- "SELL"
+  stockData$group <- NA
+  stockData$group [stockData$sig ==1] <- 2 #产生一列，金叉的地方标为2
+  stockData$group [stockData$sig ==-1] <- 6 #产生一列，死叉的地方标为2
+  stockData$col <- NA
+  stockData$col [stockData$sig ==1] <- "red" #产生一列，金叉的地方颜色为红色
+  stockData$col [stockData$sig ==-1] <- "green"  #产生一列，金叉的地方颜色为绿色
+  stockData
+}
+#仅画出均线交叉图，美哭了~~
+drawing_MA5MA10 <- function(stockMA5MA10,stockName){
+  dd <- stockMA5MA10$DATE
+  title <- paste(stockName,"5、10日均线图",sep="")
+  k1<-data.frame(date=dd,ma=stockMA5MA10$SMA5,type=rep('MA5',length(dd)))
+  k2<-data.frame(date=dd,ma=stockMA5MA10$SMA10,type=rep('MA10',length(dd)))
+  kdata<-rbind(k1,k2)
+  ggplot(kdata,aes(x=date, y=ma,color=type))+theme(legend.position=c(0.15,0.15))+geom_line(size=0.8)+ylab('Price')+ggtitle(title)+theme(plot.title=element_text(size=14,hjust=0.5,colour='black',face='bold'))
+}
+
+#解决quantmod包股票代码后缀问题
+stock <- read_excel("C:/Users/Fullbuster/Desktop/stock.xlsx")
+stockSym <- stock$股票代码
+stockSym[substr(stockSym,1,1) == 6] <- paste(stockSym[substr(stockSym,1,1) == 6],"ss",sep=".")
+stockSym[substr(stockSym,1,1) != 6] <- paste(stockSym[substr(stockSym,1,1) != 6],"sz",sep=".")
+#随机获取一支股票
+tickerSym <- rep(NA,3)
+stockName <- rep(NA,3)
+n <- rep(NA,3)
+n <- sample(1:3214,3,replace = FALSE)
+for(i in 1:3){
+  tickerSym[i] <- stockSym[n[i]]
+  stockName[i] <- stock$证券名称[n[i]]}
+#！！获取股票交易信息并处理（主程序）
+stockData1 <- get_StockData(tickerSym[1])
+stockData2 <- get_StockData(tickerSym[2])
+stockData3 <- get_StockData(tickerSym[3])
+stockMA5MA10_1 <- MACD_MA5MA10(stockData1)
+stockMA5MA10_2 <- MACD_MA5MA10(stockData2)
+stockMA5MA10_3 <- MACD_MA5MA10(stockData3)
+drawing_MA5MA10(stockMA5MA10_1,stockName[1])
+drawing_MA5MA10(stockMA5MA10_2,stockName[2])
+drawing_MA5MA10(stockMA5MA10_3,stockName[3])
+
+##------------------------------------------------------------------------------------------------
+
+
+
+## 附：标出金叉死叉点的图（很丑，且金叉死叉点不在close上，唉）
+drawing_MA5MA10 <- function(stockMA5MA10,stockName){
+  title <- paste(stockName,"5、10日均线图",sep="")
+  plot(dd,stockMA5MA10$SMA5,pch=stockMA5MA10$group,type="b",col=stockMA5MA10$col,lwd=3,xlab ="",ylab = "") #画出所有金叉和死叉点
+  lines(dd,stockMA5MA10$SMA5,type="l",lty=1,col="red") #画出MA5
+  lines(dd,stockMA5MA10$SMA10,type="l",lty=1,col="blue")#画出MA10
+  lines(dd,stockMA5MA10$CLOSE,type="l",lty=1,col="black")#画出CLOSE
+  title(main = title , xlab = "Time") #修改坐标轴名称
+  legend("topleft",xjust=1,c("BUY","SELL","MA5","MA10"),cex=0.5,pch=c(2,6,NA,NA),lty=c(NA,NA,1,1),col = c("red", "green","red","blue","black"), lwd = c(2,2)) #给出图例
+}
