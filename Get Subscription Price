@@ -1,0 +1,95 @@
+require('dplyr')
+
+#从腾讯获取股票数据函数
+getSymbols_Tencent<- function(tickerSym, freq, year) {
+  TencentSymbol <- function (tickerSym) {
+    if (substr(tickerSym, 1, 1) == '6' | substr(tickerSym, 1, 1) == '9') {
+      return(paste0('sh', tickerSym)) 
+    } else if (substr(tickerSym, 1, 1) == '0' | substr(tickerSym, 1, 1) == '3') {
+      return(paste0('sz', tickerSym))
+    } else {
+      stop('please check if you enter the right symbol')
+    }
+  }
+  #网站获取
+  tickerSym <- TencentSymbol(tickerSym)
+  freq <- ifelse(freq == 'daily',paste0(freq, '/', substr(year, 3, 4)),freq)
+  url <- paste0('http://data.gtimg.cn/flashdata/hushen/',freq, '/', tickerSym, '.js')
+  #读取网页数据并处理
+  strs <- readLines(url, warn = FALSE)
+  strs1 <- strs[2:(length(strs) - 1)]
+  strs2 <- gsub(pattern = '\\n\\',replacement = '',fixed = T,strs1)# remove '\\n\\' in the end of each line
+  DataSplit <- function(x, i){y <- strsplit(x, ' ')[[1]] # y is character 
+    return(y[i])
+  }
+  
+  DATE <- as.Date(sapply(strs2, DataSplit, 1, USE.NAMES = FALSE), '%y%m%d')
+  OPEN <- as.numeric(sapply(strs2, DataSplit, 2, USE.NAMES = FALSE))
+  HIGH <- as.numeric(sapply(strs2, DataSplit, 4, USE.NAMES = FALSE))
+  LOW <- as.numeric(sapply(strs2, DataSplit, 5, USE.NAMES = FALSE))
+  CLOSE <- as.numeric(sapply(strs2, DataSplit, 3, USE.NAMES = FALSE))
+  VOLUME <- as.numeric(sapply(strs2, DataSplit, 6, USE.NAMES = FALSE))
+  
+  stockData <- data.frame(DATE, OPEN, HIGH, LOW, CLOSE,VOLUME)
+  
+  return(stockData)
+}
+#获取股票分红
+cninfo_Symbol <- function (ticker_sym) {
+  if (substr(ticker_sym, 1, 1) == '6') {
+    return(paste0('shmb', ticker_sym)) 
+    } else if (substr(ticker_sym, 1, 3) == '002') {
+      return(paste0('szsme', ticker_sym))
+      } else if (substr(ticker_sym, 1, 1) == '3') {
+        return(paste0('szcn', ticker_sym))
+        } else if (substr(ticker_sym, 1, 3) == '000') {
+          return(paste0('szmb', ticker_sym))
+          } else {
+            stop('pls check if you enter the right symbol')
+          }
+  }
+getDiv_cninfo <- function(ticker_sym){
+  require('rvest')
+  #获取网址
+  cninfo <- 'http://www.cninfo.com.cn/information/dividend/'
+  cninfo_ticker <- cninfo_Symbol(ticker_sym)
+  HTTP <- paste0(cninfo, cninfo_ticker, '.html') 
+  #读取数据并存取数据
+  x <- read_html(HTTP)
+  return(html_table(x, header = TRUE)[[3]])
+}
+#从文字中提取具体分红情况
+divRatio <- function(plan, dtype){
+  sratio <- function(x, dtype){
+    pat <- paste0('(?<=', dtype, ')(\\d+\\.?(\\d+)?)')
+    pos <- gregexpr(pat, x, perl = TRUE)
+    if(pos == -1) {
+      return(0) 
+    } else {
+      return(as.numeric(regmatches(x, pos))/10)  
+    }
+  }
+  return(unname(sapply(plan, sratio, dtype)))
+}
+
+tickerSym <- '600519'
+stockData0 <- getSymbols_Tencent(tickerSym,"daily",2006) 
+stockData1 <- getSymbols_Tencent(tickerSym,"daily",2007) 
+stockData <- rbind(stockData0,stockData1)
+
+divData <- getDiv_cninfo(tickerSym)
+divData <- mutate(divData,cashDiv = divRatio(分红方案, '派'),stockDiv = divRatio(分红方案, '送'),reserveCap = divRatio(分红方案, '转增'))
+divData0607 <- divData[,c(4,6,7,8)]
+divData0607 <- divData0607[divData0607$除权基准日< '2008-01-01' & divData0607$除权基准日 >= '2006-01-01',]
+divData0607$除权基准日 <- as.Date(as.character(divData0607$除权基准日),'%Y%m%d')
+
+#对收盘价进行调整，还原不复权价格
+stockData$CLOSE.agency <- stockData$CLOSE
+stockData$ADJUST <- stockData$CLOSE.agency
+for (i in 1:length(divData0607$除权基准日)){
+  for (j in 1:length(stockData$DATE)){
+    if(stockData$DATE[j] >= divData0607$除权基准日[i]) stockData$ADJUST[j] <- stockData$CLOSE.agency[j]*(1+divData0607$stockDiv[i]+divData0607$reserveCap[i])+divData0607$cashDiv[i]
+  }
+  stockData$CLOSE.agency <- stockData$ADJUST
+}
+stockData <- stockData[,-7]##删除中间代理变量,任务完成！
