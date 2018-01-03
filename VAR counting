@@ -1,0 +1,60 @@
+library(quantmod)
+library(ggplot2)
+
+#获取数据
+get_StockData <- function(tickerSym) {
+  A<- getSymbols(tickerSym,src="yahoo",from="2014-12-01",to="2017-12-01",auto.assign=F)
+  a <- data.frame(time(A),Cl(A),Vo(A))
+  colnames(a) <- c("DATE","CLOSE","VOLUME")
+  b <- a[a$VOLUME != 0,]
+  b
+}
+#VAR获取
+VAR_counting <- function(bankName) {
+  bankName$re <- NA
+  n<-nrow(bankName)
+  bankName$re[2:n] <- log(bankName$CLOSE[2:n]/bankName$CLOSE[1:(n-1)])
+  m<-length(bankName$re)
+  alpha<-0.95
+  bankName$VAR<-NA
+  bankName$xv=0
+  
+  for(i in 92:m){
+    kre<-bankName$re[(i-90):(i-1)]
+    
+    norder<-trunc(90*alpha)
+    
+    skre<-sort(kre,decreasing=T)
+    
+    bankName$VAR[i]<-(skre[norder]+skre[norder+1])/2
+  }
+  bankName <- na.omit(bankName)
+  for(i in 1:length(bankName$re)){ if(bankName$re[i] < bankName$VAR[i]) bankName$xv[1]=bankName$xv[1]+1 }
+  return(bankName)
+}
+#画图
+VAR_drawing <- function(bankName,BN){
+  title <- paste(BN,"VaR Comparison",sep=" ")
+  kdata<-data.frame(dd=bankName$DATE,var=bankName$VAR,type=rep('Ordered VaR',length(bankName$DATE)))
+  ggplot(kdata,aes(x=dd, y=var,color=type))+theme(legend.position=c(0.85,0.15))+geom_line(size=0.8)+ylab('VaR')+ggtitle(title)+theme(plot.title=element_text(size=14,hjust=0.5,colour='black',face='bold'))
+}
+
+GSbank <- get_StockData("601398.ss")
+PAbank <- get_StockData("000001.ss")
+BJbank <- get_StockData("601169.ss")
+GDbank <- get_StockData("601818.ss")
+NBbank <- get_StockData("002142.sz")
+
+GSbank <- VAR_counting(GSbank)
+PAbank <- VAR_counting(PAbank)
+BJbank <- VAR_counting(BJbank)
+GDbank <- VAR_counting(GDbank)
+NBbank <- VAR_counting(NBbank)
+#违约次数统计
+xv <- c(GSbank$xv[1],PAbank$xv[1],BJbank$xv[1],GDbank$xv[1],NBbank$xv[1])
+
+VAR_drawing(GSbank,'工商银行')
+VAR_drawing(PAbank,'平安银行')
+VAR_drawing(BJbank,'北京银行')
+VAR_drawing(GDbank,'光大银行')
+VAR_drawing(NBbank,'宁波银行')
