@@ -3,8 +3,9 @@ library(bitops)
 library(XML)
 library(tuneR)
 library(rvest)
+library(readxl)
 options(warn =-1)#去除警告
-CODE=read.csv("E:\\exl\\lof.csv", header = FALSE)#读取LOF编号列表
+CODE=read_excel("C:/Users/Fullbuster/Desktop/lof.xlsx")#读取LOF编号列表
 
 UU = gsub("([N ])", "",paste("http://hq.sinajs.cn/list=sz",CODE[,1]))#读取新浪的LOF场内实时报价
 headers=basicTextGatherer()
